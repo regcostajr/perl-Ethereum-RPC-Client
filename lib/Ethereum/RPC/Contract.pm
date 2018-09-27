@@ -74,8 +74,8 @@ sub BUILD {
         }
     }
 
-    $self->from($self->rpc_client->eth_coinbase()) unless $self->from;
-    $self->gas_price($self->rpc_client->eth_gasPrice()) unless $self->gas_price;
+    $self->from($self->rpc_client->eth_coinbase()->get) unless $self->from;
+    $self->gas_price($self->rpc_client->eth_gasPrice()->get) unless $self->gas_price;
 
     return;
 
@@ -139,7 +139,7 @@ sub get_function_id {
 
     my $hex_function = $self->append_prefix(unpack("H*", $function_string));
 
-    my $sha3_hex_function = $self->rpc_client->web3_sha3($hex_function);
+    my $sha3_hex_function = $self->rpc_client->web3_sha3($hex_function)->get;
 
     return $sha3_hex_function;
 
@@ -178,7 +178,7 @@ sub _prepare_transaction {
 
 =head2 get_hex_param
 
-Convert the given value to hexadecimal format
+Convert the given value to a 32 bit hexadecimal format
 
 Parameters:
     function_id (Required - arg to be converted to hexadecimal)
@@ -207,25 +207,23 @@ sub get_hex_param {
 
 }
 
-=head2 read_all_events_from_block
+=head2 read_event
 
-Create a filter based on the given block to listen all events sent by the contract.
-
-The filter is killed before the list return, so for each request a new filter will be created.
+Read the specified log from the specified block to the latest block
 
 Parameters:
     from_block ( Optional - start search block )
-    function     ( Required - function name )
+    event     ( Required - event name )
 
 Return:
     https://github.com/ethereum/wiki/wiki/JSON-RPC#returns-42
 
 =cut
 
-sub read_all_events_from_block {
-    my ($self, $from_block, $function) = @_;
+sub read_event {
+    my ($self, $from_block, $event, $event_params_count) = @_;
 
-    my $function_id = $self->get_function_id($function);
+    my $function_id = $self->get_function_id($event, $event_params_count);
 
     $from_block = $self->append_prefix(unpack( "H*", $from_block // "latest" ));
 
@@ -265,8 +263,7 @@ Ensure that the given hexadecimal string starts with 0x.
 
 sub append_prefix {
     my ($self, $str) = @_;
-    return "0x$str" unless $str =~ /^0x/;
-    return $str;
+    return $str =~ /^0x/ ? $str : "0x$str";
 }
 
 1;

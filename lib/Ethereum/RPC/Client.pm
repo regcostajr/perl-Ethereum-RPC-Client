@@ -4,22 +4,51 @@ use strict;
 use warnings;
 
 use Moo;
-use JSON::MaybeXS;
 use Mojo::UserAgent;
 use Ethereum::RPC::Contract;
+
+use Future;
+use IO::Async;
+use Net::Async::HTTP;
+use JSON::MaybeXS;
+use Encode qw(encode_utf8);
 
 our $VERSION = '0.02';
 
 has host => (
     is      => 'ro',
     default => sub { '127.0.0.1' });
+
 has port => (
-    is      => "ro",
-    default => 8545
+    is => "ro",
+    default => 8545,
 );
-has http_client => (
-    is      => 'ro',
-    default => sub { Mojo::UserAgent->new });
+
+has _http_client => (
+    is => 'lazy',
+);
+
+sub _build__http_client {
+    return Net::Async::HTTP->new(
+        decode_content => 1,
+    );
+}
+
+has _loop => (
+    is => 'lazy',
+);
+
+sub _build__loop {
+    return IO::Async::Loop->new();
+}
+
+has _json => (
+    is => 'lazy',
+);
+
+sub _build__json {
+    return JSON::MaybeXS->new(pretty => 1);
+}
 
 ## no critic (RequireArgUnpacking)
 sub AUTOLOAD {
@@ -30,21 +59,37 @@ sub AUTOLOAD {
 
     return if ($method eq 'DESTROY');
 
-    my $url = "http://" . $self->host . ":" . $self->port;
+    my $url = "";
+    $url .= 'http://' unless $url =~ /^http/;
+    $url .= $self->host;
+    $url .= ':' . $self->port if $self->port;
 
     $self->{id} = 1;
     my $obj = {
-        id      => $self->{id}++,
-        method  => $method,
-        params  => (ref $_[0] ? $_[0] : [@_]),
+        id     => $self->{id}++,
+        method => $method,
+        params => (ref $_[0] ? $_[0] : [@_]),
     };
 
-    my $res = $self->http_client->post($url => json => $obj)->result;
+    $self->_loop->add($self->_http_client) unless defined $self->_http_client->loop;
+    return $self->get_json_response(
+        "POST" => $url,
+        encode_utf8($self->_json->encode($obj)),
+        content_type => 'application/json',
+    );
+}
 
-    return $res->json->{result} unless $res->is_error;
-    return $res->message if $res;
-    return undef;
-
+sub get_json_response {
+    my ($self, $meth, @params) = @_;
+    $self->_http_client->$meth(@params)->transform(
+        done => sub {
+            my ($resp) = @_;
+            $self->_json->decode($resp->decoded_content)->{result};
+        }
+        )->else(
+        sub {
+            Future->fail(@_);
+        });
 }
 
 =head2 contract
